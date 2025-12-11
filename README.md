@@ -1,3 +1,30 @@
+# SAM 3 Web Playground & Library
+
+This repository hosts a personal fork of **SAM 3**, featuring a custom **FastAPI Web Application** ("Playground") for interactive segmentation, ROI analysis, and metric extraction.
+
+## 🚀 SAM 3 Web Playground
+
+A powerful web interface for prompting SAM 3 with boxes, analyzing color dominance, and measuring real-world object dimensions.
+
+### Core Features
+- **Interactive Segmentation**: Draw boxes to segment objects instantly.
+- **Region of Interest (ROI)**: Focus on specific image areas for higher precision.
+- **Scale Calibration**: Set a physical scale (e.g., "10 cm") to get real-world measurements for all segments.
+- **Color Dominance Analysis**: Automatically calculates Green vs. Red ratios within segments (ignoring dark backgrounds).
+- **Normalized Visualization**: Visualizes the color distribution along the segment's major axis.
+- **Export**: Download segmentation metrics to CSV.
+
+### Quick Start (Web App)
+
+1. **Install Dependencies** (see [Installation](#installation) below).
+2. **Run the Server**:
+   ```bash
+   uvicorn app.main:app --host 0.0.0.0 --port 8000
+   ```
+3. **Open Browser**: Navigate to `http://localhost:8000`.
+
+---
+
 # SAM 3: Segment Anything with Concepts
 
 Meta Superintelligence Labs

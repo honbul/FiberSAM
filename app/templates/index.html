@@ -1,0 +1,201 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SAM3 FastAPI Lab</title>
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+  <div class="page">
+    <header class="hero">
+      <div>
+        <p class="eyebrow">SAM3 Playground</p>
+        <h1>Segment Anything with box prompts.</h1>
+        <p class="lede">Upload an image or link to one, set scale/ROI, and draw boxes to segment. FastAPI + SAM3 under the hood.</p>
+      </div>
+      <div class="hero-badge">
+        <span>FastAPI</span>
+        <span>SAM3</span>
+        <span>Custom UI</span>
+      </div>
+    </header>
+    <section class="card guide">
+      <h3>User guide</h3>
+      <ol>
+        <li>Load an image via Upload/drag-and-drop or paste a URL and click Load URL.</li>
+        <li>(Optional) Set a scale by entering a real length, click Mark Scale, then click two points on the image (keep this on the original image before ROI).</li>
+        <li>(Optional) Mark ROI: click Mark ROI, draw a box; ROI is sent but the full image stays visible so overlay aligns.</li>
+        <li>Choose prompt type (text/box/dot), adjust confidence, fill-masks, and box thickness.</li>
+        <li>Click Segment. Hover the result to see per-segment length/green/red/confidence; table shows thumbnails and metrics.</li>
+      </ol>
+    </section>
+
+    <main class="layout">
+      <section class="panel left">
+        <div class="card">
+          <div class="card-header">
+            <h2>1) Image source</h2>
+            <p>Upload or paste a link, then load to paint on the canvas.</p>
+          </div>
+          <div class="input-grid">
+            <label class="input">
+              <span>Upload file</span>
+              <input type="file" id="fileInput" accept="image/*" />
+            </label>
+            <label class="input">
+              <span>Image URL</span>
+              <input type="url" id="urlInput" placeholder="https://..." />
+            </label>
+            <button id="loadUrl" class="action ghost">Load URL</button>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-header">
+            <h2>2) Scale</h2>
+            <p>Provide a real-world length and mark a scale line on the image.</p>
+          </div>
+          <div class="input-grid">
+            <label class="input">
+              <span>Scale length</span>
+              <input type="number" id="scaleLength" placeholder="e.g. 10" min="0" step="0.01" />
+            </label>
+            <label class="input">
+              <span>Unit</span>
+              <input type="text" id="scaleUnit" placeholder="cm, in, m..." />
+            </label>
+          </div>
+          <div class="actions">
+            <button id="scaleMark" class="action ghost">Mark Scale</button>
+            <button id="scaleClear" class="action ghost">Clear Scale</button>
+          </div>
+          <p class="hint">Click twice on the canvas to define the scale line.</p>
+        </div>
+
+        <div class="card">
+          <div class="card-header">
+            <h2>3) ROI</h2>
+            <p>Select a region of interest; canvas keeps the full view for context. (Under development)</p>
+          </div>
+          <div class="actions">
+            <button id="roiStart" class="action ghost">Mark ROI</button>
+            <button id="roiClear" class="action ghost">Clear ROI</button>
+            <button id="roiRevert" class="action ghost">Revert Image</button>
+          </div>
+          <p class="hint">ROI box shows on the canvas only; ROI-only output displays the cropped region.</p>
+        </div>
+
+        <div class="card">
+          <div class="card-header">
+            <h2>4) Drawing box</h2>
+            <p>Click once to start the box and once to end; adjust display options.</p>
+          </div>
+
+          <div class="prompt-row" id="boxPromptRow">
+            <div class="prompt-meta">
+              <p>Draw a box on the canvas. Drag to place. Toggle polarity.</p>
+              <label class="pill"><input type="checkbox" id="boxLabel" checked /> Positive box</label>
+            </div>
+          </div>
+
+          <label class="input slider">
+            <div class="slider-label">
+              <span>Confidence threshold</span>
+              <span id="confValue">0.50</span>
+            </div>
+            <input type="range" id="confidence" min="0" max="1" step="0.01" value="0.5" />
+          </label>
+
+          <div class="result-toggles">
+            <label class="pill"><input type="checkbox" id="scoreToggle" checked /> Show confidence</label>
+            <label class="pill"><input type="checkbox" id="roiOnlyToggle" /> ROI only</label>
+            <label class="pill"><input type="checkbox" id="maskFillToggle" checked /> Fill masks</label>
+            <label class="input thin">
+              <span>Box thickness</span>
+              <input type="number" id="boxThickness" value="3" min="1" max="10" step="1" />
+            </label>
+          </div>
+
+          <div class="actions">
+            <button id="clearPrompt" class="action ghost">Clear prompt</button>
+            <button id="segmentBtn" class="action">Segment</button>
+          </div>
+          <p class="hint">Click once to start and once to end the box on the canvas.</p>
+        </div>
+      </section>
+
+      <section class="panel right">
+        <div class="card canvas-card">
+          <div class="card-header">
+            <h2>Canvas</h2>
+            <p>Canvas accepts drawing after an image is loaded.</p>
+            <span id="canvasStatus" class="status chip">No image yet</span>
+          </div>
+          <div class="canvas-shell">
+            <canvas id="canvas" class="canvas"></canvas>
+            <div id="canvasLog" class="canvas-log">No image loaded yet.</div>
+            <img id="previewImage" alt="" />
+          </div>
+        </div>
+      </section>
+
+      <section class="panel output">
+        <div class="card">
+          <div class="card-header">
+            <h2>Segmentation output</h2>
+            <p id="resultMeta">Waiting for a run.</p>
+          </div>
+          <div class="result-block">
+            <p class="micro">Overlay</p>
+            <div class="result-overlay-shell">
+              <img id="resultImage" class="result" alt="Segmentation overlay" />
+              <canvas id="resultOverlay" class="result-overlay"></canvas>
+              <div id="resultTooltip" class="tooltip" style="display:none;"></div>
+            </div>
+            <div class="result-stats row">
+              <div class="stat">
+                <p class="micro">Masks found</p>
+                <strong id="maskCount">0</strong>
+              </div>
+              <div class="stat">
+                <p class="micro">Lengths</p>
+                <p id="areaList">-</p>
+              </div>
+              <div class="stat">
+                <p class="micro">Scores</p>
+                <p id="scoreList">-</p>
+              </div>
+              <div class="stat">
+                <p class="micro">Runtime</p>
+                <p id="runtime">-</p>
+              </div>
+            </div>
+            <div class="table-wrap">
+              <div class="table-actions">
+                <button id="exportCsv" class="action ghost">Export CSV</button>
+              </div>
+              <table class="segments-table">
+                <thead>
+                  <tr>
+                    <th>#</th>
+                    <th>Segment</th>
+                    <th>Normalized segment</th>
+                    <th>Length</th>
+                    <th>Green (%)</th>
+                    <th>Red (%)</th>
+                    <th>Confidence</th>
+                  </tr>
+                </thead>
+                <tbody id="segmentsBody"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script src="/static/app.js?v=2"></script>
+</body>
+</html>
