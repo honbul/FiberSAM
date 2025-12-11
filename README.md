@@ -419,4 +419,4 @@ If you use SAM 3 or the SA-Co dataset in your research, please use the following
       primaryClass={cs.CV},
       url={https://arxiv.org/abs/2511.16719},
 }
-```
+```# FiberSAM
