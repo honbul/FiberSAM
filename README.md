@@ -1,29 +1,28 @@
-# SAM 3 Web Playground & Library
+# SAM3 Web Playground (FastAPI) + SAM3 Library Fork
 
-This repository hosts a personal fork of **SAM 3**, featuring a custom **FastAPI Web Application** ("Playground") for interactive segmentation, ROI analysis, and metric extraction.
+This repo is a fork of Meta’s **SAM3** with an additional **FastAPI web playground** for interactive, box-based segmentation and metric extraction.
 
-## 🚀 SAM 3 Web Playground
-
-A powerful web interface for prompting SAM 3 with boxes, analyzing color dominance, and measuring real-world object dimensions.
+## Web Playground
 
 ### Core Features
-- **Interactive Segmentation**: Draw boxes to segment objects instantly.
-- **Region of Interest (ROI)**: Focus on specific image areas for higher precision.
-- **Scale Calibration**: Set a physical scale (e.g., "10 cm") to get real-world measurements for all segments.
-- **Color Dominance Analysis**: Automatically calculates Green vs. Red ratios within segments (ignoring dark backgrounds).
-- **Normalized Visualization**: Visualizes the color distribution along the segment's major axis.
-- **Export**: Download segmentation metrics to CSV.
+- **Image input**: upload or URL; TIFF is supported (multi-page TIFF uses the first frame).
+- **Box prompts**: click once to start and once to finish a bounding box; `Esc` cancels an in-progress box.
+- **Scale calibration**: click two points to define a real-world scale for length measurement.
+- **Per-segment metrics**: bbox-based length (+ optional scaling), confidence, and red/green dominance along the major axis.
+- **Export**: download per-segment metrics as CSV.
 
-### Quick Start (Web App)
+### Quick Start
 
-1. **Install Dependencies** (see [Installation](#installation) below).
-2. **Run the Server**:
-   ```bash
-   uvicorn app.main:app --host 0.0.0.0 --port 8000
-   ```
-3. **Open Browser**: Navigate to `http://localhost:8000`.
+```bash
+uvicorn app.main:app --host 0.0.0.0 --port 8000
+```
+
+Open `http://localhost:8000`.
 
 ---
+
+<details>
+<summary>SAM3 upstream README (collapsed)</summary>
 
 # SAM 3: Segment Anything with Concepts
 
@@ -419,5 +418,6 @@ If you use SAM 3 or the SA-Co dataset in your research, please use the following
       primaryClass={cs.CV},
       url={https://arxiv.org/abs/2511.16719},
 }
-```# FiberSAM
-# FiberSAM
+```
+
+</details>
