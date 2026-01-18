@@ -12,7 +12,7 @@
       <div>
         <p class="eyebrow">SAM3 Playground</p>
         <h1>Segment Anything with box prompts.</h1>
-        <p class="lede">Upload an image or link to one, set scale/ROI, and draw boxes to segment. FastAPI + SAM3 under the hood.</p>
+        <p class="lede">Upload an image (JPG, PNG, TIFF) or link to one, set scale, and draw boxes to segment. FastAPI + SAM3 under the hood.</p>
       </div>
       <div class="hero-badge">
         <span>FastAPI</span>
@@ -23,9 +23,8 @@
     <section class="card guide">
       <h3>User guide</h3>
       <ol>
-        <li>Load an image via Upload/drag-and-drop or paste a URL and click Load URL.</li>
-        <li>(Optional) Set a scale by entering a real length, click Mark Scale, then click two points on the image (keep this on the original image before ROI).</li>
-        <li>(Optional) Mark ROI: click Mark ROI, draw a box; ROI is sent but the full image stays visible so overlay aligns.</li>
+        <li>Load an image via Upload/drag-and-drop or paste a URL and click Load URL. Supports multi-page TIFFs (loads first frame).</li>
+        <li>(Optional) Set a scale by entering a real length, click Mark Scale, then click two points on the image.</li>
         <li>Choose prompt type (text/box/dot), adjust confidence, fill-masks, and box thickness.</li>
         <li>Click Segment. Hover the result to see per-segment length/green/red/confidence; table shows thumbnails and metrics.</li>
       </ol>
@@ -41,7 +40,7 @@
           <div class="input-grid">
             <label class="input">
               <span>Upload file</span>
-              <input type="file" id="fileInput" accept="image/*" />
+              <input type="file" id="fileInput" accept="image/*,.tif,.tiff" />
             </label>
             <label class="input">
               <span>Image URL</span>
@@ -75,26 +74,13 @@
 
         <div class="card">
           <div class="card-header">
-            <h2>3) ROI</h2>
-            <p>Select a region of interest; canvas keeps the full view for context. (Under development)</p>
-          </div>
-          <div class="actions">
-            <button id="roiStart" class="action ghost">Mark ROI</button>
-            <button id="roiClear" class="action ghost">Clear ROI</button>
-            <button id="roiRevert" class="action ghost">Revert Image</button>
-          </div>
-          <p class="hint">ROI box shows on the canvas only; ROI-only output displays the cropped region.</p>
-        </div>
-
-        <div class="card">
-          <div class="card-header">
-            <h2>4) Drawing box</h2>
+            <h2>3) Drawing box</h2>
             <p>Click once to start the box and once to end; adjust display options.</p>
           </div>
 
           <div class="prompt-row" id="boxPromptRow">
             <div class="prompt-meta">
-              <p>Draw a box on the canvas. Drag to place. Toggle polarity.</p>
+              <p>Draw a box on the canvas. Click to start, click to finish. Toggle polarity.</p>
               <label class="pill"><input type="checkbox" id="boxLabel" checked /> Positive box</label>
             </div>
           </div>
@@ -109,7 +95,6 @@
 
           <div class="result-toggles">
             <label class="pill"><input type="checkbox" id="scoreToggle" checked /> Show confidence</label>
-            <label class="pill"><input type="checkbox" id="roiOnlyToggle" /> ROI only</label>
             <label class="pill"><input type="checkbox" id="maskFillToggle" checked /> Fill masks</label>
             <label class="input thin">
               <span>Box thickness</span>

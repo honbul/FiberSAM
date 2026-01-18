@@ -20,11 +20,7 @@ const lengthList = document.getElementById("areaList"); // reuse same DOM id for
 const scoreList = document.getElementById("scoreList");
 const runtimeEl = document.getElementById("runtime");
 const canvasStatus = document.getElementById("canvasStatus");
-const roiStartBtn = document.getElementById("roiStart");
-const roiClearBtn = document.getElementById("roiClear");
-const roiRevertBtn = document.getElementById("roiRevert");
 const scoreToggle = document.getElementById("scoreToggle");
-const roiOnlyToggle = document.getElementById("roiOnlyToggle");
 const scaleLengthInput = document.getElementById("scaleLength");
 const scaleUnitInput = document.getElementById("scaleUnit");
 const scaleMarkBtn = document.getElementById("scaleMark");
@@ -69,10 +65,6 @@ const state = {
   start: null,
   imageFile: null,
   originalDataURL: null,
-  roi: null,
-  roiDraft: null,
-  roiMode: false,
-  roiApplied: false,
   scaleMode: false,
   scaleLine: null,
   scalePixels: null,
@@ -126,19 +118,6 @@ function drawCanvas(previewBox = null) {
     ctx.lineWidth = 2;
   }
 
-  const roiBox = state.roiDraft;
-  if (roiBox) {
-    ctx.strokeStyle = "#ffd166";
-    ctx.setLineDash([6, 4]);
-    ctx.strokeRect(
-      roiBox.x0,
-      roiBox.y0,
-      roiBox.x1 - roiBox.x0,
-      roiBox.y1 - roiBox.y0
-    );
-    ctx.setLineDash([]);
-  }
-
   const boxToDraw = previewBox || state.box;
   if (boxToDraw) {
     ctx.strokeStyle = boxLabelInput.checked ? "#7df3ff" : "#ff7e6b";
@@ -178,6 +157,8 @@ function setCanvasSize() {
 function resetPrompts() {
   state.box = null;
   state.dot = null;
+  state.drawing = false;
+  state.start = null;
   drawCanvas();
 }
 
@@ -190,9 +171,6 @@ function handleFileChange(event) {
 function loadLocalFile(file) {
   state.imageFile = file;
   urlInput.value = "";
-  state.roiApplied = false;
-  state.roi = null;
-  state.roiDraft = null;
   state.resultSegs = [];
   state.originalDataURL = null;
   setStatus(`Loading local image: ${file.name}...`);
@@ -229,9 +207,6 @@ function handleUrlLoad() {
       previewImage.src = objectUrl;
       state.imageFile = new File([blob], "remote_image", { type: blob.type });
       state.originalDataURL = objectUrl;
-      state.roiApplied = false;
-      state.roi = null;
-      state.roiDraft = null;
       setStatus("URL loaded; ready to draw");
     })
     .catch((err) => {
@@ -250,10 +225,6 @@ previewImage.onload = () => {
   if (!state.originalDataURL) {
     state.originalDataURL = previewImage.src;
   }
-  state.roi = null;
-  state.roiDraft = null;
-  state.roiApplied = false;
-  state.roiMode = false;
   state.scaleLine = null;
   state.scalePixels = null;
   state.scaleMode = false;
@@ -277,51 +248,6 @@ function handlePromptTypeChange(evt) {
   state.promptType = evt.target.value;
   resetPrompts();
   togglePromptRows();
-}
-
-function startRoiMode() {
-  if (!state.naturalWidth) {
-    alert("Load an image first.");
-    return;
-  }
-  state.roiApplied = false;
-  state.roiMode = true;
-  state.roiDraft = null;
-  state.scaleMode = false;
-  setStatus("Draw ROI on the canvas to apply crop.");
-}
-
-function applyRoiCrop() {
-  if (!state.roiDraft) {
-    alert("Draw an ROI box first.");
-    return;
-  }
-  state.roi = { ...state.roiDraft };
-  state.roiMode = false;
-  state.roiApplied = true;
-  state.roiDraft = null;
-  drawCanvas();
-  setStatus(
-    `ROI applied (${(state.roi.x1 - state.roi.x0).toFixed(0)}x${(state.roi.y1 - state.roi.y0).toFixed(0)}).`
-  );
-}
-
-function clearRoi() {
-  revertImage();
-  setStatus("ROI cleared and original view restored.");
-}
-
-function revertImage() {
-  if (!state.originalDataURL) return;
-  previewImage.src = state.originalDataURL;
-  state.roi = null;
-  state.roiDraft = null;
-  state.roiMode = false;
-  state.roiApplied = false;
-  state.scaleLine = null;
-  state.scalePixels = null;
-  resetPrompts();
-  setStatus("Reverted to original image.");
 }
 
 function startScaleMode() {
@@ -348,29 +274,10 @@ function clearScale() {
   setStatus("Scale cleared.");
 }
 
-canvas.addEventListener("mousedown", (evt) => {
-  if (!state.naturalWidth) return;
-  const pt = getPointerPosition(evt);
-  state.drawing = true;
-  state.start = pt;
-  if (state.roiMode) {
-    state.roiDraft = { x0: pt.x, y0: pt.y, x1: pt.x, y1: pt.y };
-  }
-});
 
 canvas.addEventListener("mousemove", (evt) => {
   if (!state.drawing) return;
   const current = getPointerPosition(evt);
-  if (state.roiMode) {
-    state.roiDraft = {
-      x0: clamp(Math.min(state.start.x, current.x), 0, state.naturalWidth),
-      y0: clamp(Math.min(state.start.y, current.y), 0, state.naturalHeight),
-      x1: clamp(Math.max(state.start.x, current.x), 0, state.naturalWidth),
-      y1: clamp(Math.max(state.start.y, current.y), 0, state.naturalHeight),
-    };
-    drawCanvas();
-    return;
-  }
   if (state.promptType !== "box") return;
   drawCanvas({
     x0: state.start.x,
@@ -380,42 +287,16 @@ canvas.addEventListener("mousemove", (evt) => {
   });
 });
 
-canvas.addEventListener("mouseup", (evt) => {
-  if (!state.drawing) return;
-  state.drawing = false;
-  const end = getPointerPosition(evt);
-
-  if (state.roiMode) {
-    state.roiDraft = {
-      x0: clamp(Math.min(state.start.x, end.x), 0, state.naturalWidth),
-      y0: clamp(Math.min(state.start.y, end.y), 0, state.naturalHeight),
-      x1: clamp(Math.max(state.start.x, end.x), 0, state.naturalWidth),
-      y1: clamp(Math.max(state.start.y, end.y), 0, state.naturalHeight),
-    };
-    drawCanvas();
-    applyRoiCrop();
-    return;
-  }
-
-  if (state.promptType !== "box") return;
-  const box = {
-    x0: clamp(Math.min(state.start.x, end.x), 0, state.naturalWidth),
-    y0: clamp(Math.min(state.start.y, end.y), 0, state.naturalHeight),
-    x1: clamp(Math.max(state.start.x, end.x), 0, state.naturalWidth),
-    y1: clamp(Math.max(state.start.y, end.y), 0, state.naturalHeight),
-  };
-  state.box = box;
-  drawCanvas();
-});
 
 canvas.addEventListener("click", (evt) => {
-  if (state.roiMode || !state.naturalWidth) return;
+  if (!state.naturalWidth) return;
+  const pt = getPointerPosition(evt);
 
   if (state.scaleMode) {
-    const pt = getPointerPosition(evt);
     if (!state.scaleLine) {
       state.scaleLine = { x0: pt.x, y0: pt.y, x1: pt.x, y1: pt.y };
       drawCanvas();
+      setStatus("Scale start set. Click end point.");
       return;
     }
     state.scaleLine = { ...state.scaleLine, x1: pt.x, y1: pt.y };
@@ -428,10 +309,31 @@ canvas.addEventListener("click", (evt) => {
     return;
   }
 
-  if (state.promptType !== "dot") return;
-  const pt = getPointerPosition(evt);
-  state.dot = { x: pt.x, y: pt.y };
-  drawCanvas();
+  if (state.promptType === "box") {
+    if (!state.drawing) {
+      state.drawing = true;
+      state.start = pt;
+      setStatus("Box started. Click again to finish.");
+    } else {
+      state.drawing = false;
+      const end = pt;
+      state.box = {
+        x0: clamp(Math.min(state.start.x, end.x), 0, state.naturalWidth),
+        y0: clamp(Math.min(state.start.y, end.y), 0, state.naturalHeight),
+        x1: clamp(Math.max(state.start.x, end.x), 0, state.naturalWidth),
+        y1: clamp(Math.max(state.start.y, end.y), 0, state.naturalHeight),
+      };
+      state.start = null;
+      drawCanvas();
+      setStatus("Box defined.");
+    }
+    return;
+  }
+
+  if (state.promptType === "dot") {
+    state.dot = { x: pt.x, y: pt.y };
+    drawCanvas();
+  }
 });
 
 confidenceInput.addEventListener("input", () => {
@@ -441,11 +343,17 @@ confidenceInput.addEventListener("input", () => {
 fileInput.addEventListener("change", handleFileChange);
 loadUrlBtn.addEventListener("click", handleUrlLoad);
 clearPromptBtn.addEventListener("click", resetPrompts);
-roiStartBtn.addEventListener("click", startRoiMode);
-roiClearBtn.addEventListener("click", clearRoi);
-roiRevertBtn.addEventListener("click", revertImage);
 scaleMarkBtn.addEventListener("click", startScaleMode);
 scaleClearBtn.addEventListener("click", clearScale);
+
+document.addEventListener("keydown", (evt) => {
+  if (evt.key !== "Escape") return;
+  if (!state.drawing) return;
+  state.drawing = false;
+  state.start = null;
+  drawCanvas();
+  setStatus("Box cancelled.");
+});
 
 async function segment() {
   if (!state.naturalWidth || (!state.imageFile && !urlInput.value.trim())) {
@@ -467,14 +375,7 @@ async function segment() {
     alert("Draw a box on the canvas.");
     return;
   }
-  const box = state.roi
-    ? {
-        x0: state.box.x0 - state.roi.x0,
-        y0: state.box.y0 - state.roi.y0,
-        x1: state.box.x1 - state.roi.x0,
-        y1: state.box.y1 - state.roi.y0,
-      }
-    : state.box;
+  const box = state.box;
   box.x0 = clamp(box.x0, 0, state.naturalWidth);
   box.y0 = clamp(box.y0, 0, state.naturalHeight);
   box.x1 = clamp(box.x1, 0, state.naturalWidth);
@@ -485,12 +386,6 @@ async function segment() {
   fd.append("box_y1", box.y1);
   fd.append("box_label", boxLabelInput.checked);
 
-  if (state.roi) {
-    fd.append("roi_x0", state.roi.x0);
-    fd.append("roi_y0", state.roi.y0);
-    fd.append("roi_x1", state.roi.x1);
-    fd.append("roi_y1", state.roi.y1);
-  }
   const scaleLen = parseFloat(scaleLengthInput.value);
   if (!Number.isNaN(scaleLen) && scaleLen > 0 && state.scalePixels) {
     fd.append("scale_length", scaleLen);
@@ -505,8 +400,6 @@ async function segment() {
     boxThicknessInput && boxThicknessInput.value ? boxThicknessInput.value : 3
   );
   fd.append("show_scores", scoreToggle.checked);
-  const roiOnly = roiOnlyToggle.checked && !state.roiApplied;
-  fd.append("roi_only", roiOnly);
 
   resultMeta.textContent = "Running segmentation...";
   const start = performance.now();
@@ -545,7 +438,6 @@ async function segment() {
       w: data.width,
       h: data.height,
       length_unit: data.length_unit,
-      roi: data.roi || null,
     };
     syncResultOverlay();
 
@@ -647,28 +539,6 @@ function clearResultOverlay() {
   const ctx2 = resultOverlay.getContext("2d");
   ctx2.clearRect(0, 0, resultOverlay.width, resultOverlay.height);
   resultTooltip.style.display = "none";
-
-  // draw ROI outline if available
-  const roi = state.resultNatural.roi;
-  if (!roi || !state.resultNatural.w || !state.resultNatural.h) return;
-  const rect = resultOverlayShell.getBoundingClientRect();
-  const scaleX = state.resultNatural.w / rect.width;
-  const scaleY = state.resultNatural.h / rect.height;
-  const roiW = roi.x1 - roi.x0;
-  const roiH = roi.y1 - roi.y0;
-  const showingCrop = Math.abs(roiW - state.resultNatural.w) < 1e-3 && Math.abs(roiH - state.resultNatural.h) < 1e-3;
-  if (showingCrop) return; // when displaying ROI-only, no need to redraw ROI box
-  const offsetX = showingCrop ? roi.x0 : 0;
-  const offsetY = showingCrop ? roi.y0 : 0;
-  const drawX = (roi.x0 - offsetX) / scaleX;
-  const drawY = (roi.y0 - offsetY) / scaleY;
-  const drawW = roiW / scaleX;
-  const drawH = roiH / scaleY;
-  ctx2.strokeStyle = "#ffd166";
-  ctx2.setLineDash([6, 4]);
-  ctx2.lineWidth = 2;
-  ctx2.strokeRect(drawX, drawY, drawW, drawH);
-  ctx2.setLineDash([]);
 }
 
 function handleResultHover(evt) {
@@ -682,20 +552,9 @@ function handleResultHover(evt) {
   }
   const scaleX = state.resultNatural.w / rect.width;
   const scaleY = state.resultNatural.h / rect.height;
-  const roi = state.resultNatural.roi;
-  let roiOffsetX = 0;
-  let roiOffsetY = 0;
-  if (roi) {
-    const roiW = roi.x1 - roi.x0;
-    const roiH = roi.y1 - roi.y0;
-    const showingCrop = Math.abs(roiW - state.resultNatural.w) < 1e-3 && Math.abs(roiH - state.resultNatural.h) < 1e-3;
-    if (showingCrop) {
-      roiOffsetX = roi.x0;
-      roiOffsetY = roi.y0;
-    }
-  }
-  const x = xDisplay * scaleX + roiOffsetX;
-  const y = yDisplay * scaleY + roiOffsetY;
+
+  const x = xDisplay * scaleX;
+  const y = yDisplay * scaleY;
 
   let hit = null;
   for (const seg of state.resultSegs) {
@@ -711,8 +570,8 @@ function handleResultHover(evt) {
 
   const ctx2 = resultOverlay.getContext("2d");
   const [x0, y0, x1, y1] = hit.box;
-  const drawX0 = (x0 - roiOffsetX) / scaleX;
-  const drawY0 = (y0 - roiOffsetY) / scaleY;
+  const drawX0 = x0 / scaleX;
+  const drawY0 = y0 / scaleY;
   const drawW = (x1 - x0) / scaleX;
   const drawH = (y1 - y0) / scaleY;
   ctx2.fillStyle = "rgba(255,255,255,0.15)";

@@ -2,7 +2,7 @@ import asyncio
 import base64
 import io
 import os
-from typing import Dict, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, cast
 
 import numpy as np
 import requests
@@ -28,7 +28,7 @@ def _resolve_device():
     return "cuda" if torch.cuda.is_available() else "cpu"
 
 
-def _load_model() -> Tuple:
+def _load_model() -> Tuple[Any, Sam3Processor]:
     """Load the SAM3 image model and processor once."""
     device = _resolve_device()
     checkpoint = os.environ.get("SAM3_CHECKPOINT_PATH")
@@ -52,27 +52,49 @@ async def index():
         return HTMLResponse(f.read())
 
 
-def _load_image(image_file: Optional[UploadFile], image_url: Optional[str]) -> Image.Image:
+def _ensure_rgb(image: Image.Image) -> Image.Image:
+    try:
+        if getattr(image, "n_frames", 1) > 1:
+            image.seek(0)
+    except Exception:
+        pass
+
+    image.load()
+    return image.convert("RGB")
+
+
+def _load_image(
+    image_file: Optional[UploadFile], image_url: Optional[str]
+) -> Image.Image:
     """Load an image from an upload or URL."""
     if image_file is None and not image_url:
-        raise HTTPException(status_code=400, detail="Provide an upload or an image URL.")
+        raise HTTPException(
+            status_code=400, detail="Provide an upload or an image URL."
+        )
 
     if image_file is not None:
         data = image_file.file.read()
         try:
-            return Image.open(io.BytesIO(data)).convert("RGB")
+            image = Image.open(io.BytesIO(data))
+            return _ensure_rgb(image)
         except Exception as exc:  # pragma: no cover - input validation
-            raise HTTPException(status_code=400, detail="Unsupported image format.") from exc
+            raise HTTPException(
+                status_code=400, detail="Unsupported image format."
+            ) from exc
 
     try:
+        assert image_url is not None
         response = requests.get(image_url, timeout=10)
         response.raise_for_status()
-        return Image.open(io.BytesIO(response.content)).convert("RGB")
+        image = Image.open(io.BytesIO(response.content))
+        return _ensure_rgb(image)
     except Exception as exc:  # pragma: no cover - runtime fetch
-        raise HTTPException(status_code=400, detail=f"Could not fetch image: {exc}") from exc
+        raise HTTPException(
+            status_code=400, detail=f"Could not fetch image: {exc}"
+        ) from exc
 
 
-def _normalize_box(box_xyxy: Dict[str, float], width: int, height: int) -> list:
+def _normalize_box(box_xyxy: Dict[str, float], width: int, height: int) -> List[float]:
     """Convert xyxy pixel box to cxcywh normalized for the processor."""
     x0, y0, x1, y1 = (
         float(box_xyxy["x0"]),
@@ -104,7 +126,7 @@ def analyze_color_dominance(base_np, mask_np, x0, y0, axis_len, axis_is_x):
 
     # Ignore dark pixels (e.g. black background)
     threshold = 30.0
-    
+
     red_dom_mask = (r > g * 1.1) & (r > b * 1.1) & (r > threshold)
     green_dom_mask = (g > r * 1.1) & (g > b * 1.1) & (g > threshold)
 
@@ -162,7 +184,7 @@ def generate_normalized_line_b64(axis_len, red_pos, green_pos):
         source_line[0, green_pos] = np.array([80, 255, 160], dtype=np.uint8)
 
     line_img = Image.fromarray(source_line)
-    line_img = line_img.resize((line_w, line_h), resample=Image.NEAREST)
+    line_img = line_img.resize((line_w, line_h), resample=Image.Resampling.NEAREST)
 
     line_buff = io.BytesIO()
     line_img.save(line_buff, format="PNG")
@@ -171,12 +193,12 @@ def generate_normalized_line_b64(axis_len, red_pos, green_pos):
 
 def _draw_overlay(
     image: Image.Image,
-    state: Dict,
+    state: Dict[str, Any],
     requested_box: Optional[Dict[str, float]],
     requested_dot: Optional[Dict[str, float]],
     include_box: bool,
     show_scores: bool,
-    number_labels: Optional[list] = None,
+    number_labels: Optional[List[int]] = None,
     fill_masks: bool = True,
     box_thickness: float = 3.0,
 ):
@@ -185,9 +207,9 @@ def _draw_overlay(
     mask_layer = Image.new("RGBA", base.size, (0, 0, 0, 0))
     draw = ImageDraw.Draw(mask_layer)
 
-    masks = state.get("masks", [])
-    boxes = state.get("boxes", [])
-    scores = state.get("scores", [])
+    masks = cast(List[Any], state.get("masks", []))
+    boxes = cast(List[Any], state.get("boxes", []))
+    scores = cast(List[Any], state.get("scores", []))
     colors = [
         (255, 99, 71),
         (66, 135, 245),
@@ -217,9 +239,7 @@ def _draw_overlay(
             label_y = max(y0 - 24, 0)
             label_x = x0
             if show_scores:
-                draw.rectangle(
-                    [label_x, label_y, label_x + 90, y0], fill=(*color, 200)
-                )
+                draw.rectangle([label_x, label_y, label_x + 90, y0], fill=(*color, 200))
                 draw.text((label_x + 4, label_y + 2), f"{score:.2f}", fill="white")
             if number_labels:
                 number_str = str(number_labels[idx])
@@ -229,7 +249,12 @@ def _draw_overlay(
     # Show user prompts back on the image
     if requested_box:
         draw.rectangle(
-            [requested_box["x0"], requested_box["y0"], requested_box["x1"], requested_box["y1"]],
+            [
+                requested_box["x0"],
+                requested_box["y0"],
+                requested_box["x1"],
+                requested_box["y1"],
+            ],
             outline=(255, 255, 255),
             width=2,
         )
@@ -251,32 +276,14 @@ def _segment(
     box_payload: Optional[Dict[str, float]],
     dot_payload: Optional[Dict[str, float]],
     confidence: float,
-    roi: Optional[Dict[str, float]],
     show_scores: bool,
     scale_length: Optional[float],
     scale_px: Optional[float],
     scale_unit: Optional[str],
     fill_masks: bool,
     box_thickness: float,
-    roi_only: bool,
 ):
     original_image = image
-    if roi:
-        x0, y0, x1, y1 = (
-            int(roi["x0"]),
-            int(roi["y0"]),
-            int(roi["x1"]),
-            int(roi["y1"]),
-        )
-        x0, y0 = max(x0, 0), max(y0, 0)
-        x1, y1 = min(x1, image.width), min(y1, image.height)
-        if x1 - x0 < 2 or y1 - y0 < 2:
-            raise HTTPException(status_code=400, detail="ROI is invalid or too small.")
-        crop_offset = (x0, y0)
-        image = image.crop((x0, y0, x1, y1))
-    else:
-        crop_offset = None
-
     width, height = image.size
     orig_width, orig_height = original_image.size
     state = PROCESSOR.set_image(image, state={})
@@ -326,39 +333,8 @@ def _segment(
     masks = state.get("masks", [])
     boxes = state.get("boxes", [])
 
-    # If cropped and not ROI-only, pad masks/boxes back to original coords
-    if crop_offset and (not roi_only) and isinstance(masks, np.ndarray) is False:
-        try:
-            import torch
-        except Exception:
-            torch = None
-        ox, oy = crop_offset
-        if torch and isinstance(masks, torch.Tensor):
-            n, c, h, w = masks.shape
-            padded = masks.new_zeros((n, c, orig_height, orig_width))
-            padded[:, :, oy : oy + h, ox : ox + w] = masks
-            masks = padded
-            state["masks"] = masks
-        elif isinstance(masks, list) and len(masks) > 0 and hasattr(masks[0], "shape"):
-            padded_list = []
-            for m in masks:
-                h, w = m.shape[-2:]
-                blank = np.zeros((1, orig_height, orig_width), dtype=m.dtype)
-                blank[:, oy : oy + h, ox : ox + w] = m
-                padded_list.append(blank)
-            masks = padded_list
-            state["masks"] = masks
+    base_image = original_image
 
-        if boxes is not None:
-            if torch and isinstance(boxes, torch.Tensor):
-                offset = torch.tensor([ox, oy, ox, oy], device=boxes.device, dtype=boxes.dtype)
-                boxes = boxes + offset
-                state["boxes"] = boxes
-            elif isinstance(boxes, np.ndarray):
-                boxes = boxes + np.array([ox, oy, ox, oy])
-                state["boxes"] = boxes
-
-    base_image = image if (roi_only and crop_offset) else original_image
     base_rgba = base_image.convert("RGBA")
     base_np = np.array(base_rgba)
     masks = state.get("masks", [])
@@ -369,8 +345,8 @@ def _segment(
         ys, xs = np.nonzero(mask_np)
         x0, x1 = xs.min(), xs.max()
         y0, y1 = ys.min(), ys.max()
-        width_px = (x1 - x0 + 1)
-        height_px = (y1 - y0 + 1)
+        width_px = x1 - x0 + 1
+        height_px = y1 - y0 + 1
         length_px = max(width_px, height_px)
         if px_per_unit:
             lengths.append(length_px / px_per_unit)
@@ -424,7 +400,7 @@ def _segment(
         box_thickness=box_thickness,
     )
 
-    out_w, out_h = base_image.size if roi_only and crop_offset else (orig_width, orig_height)
+    out_w, out_h = (orig_width, orig_height)
 
     return overlay, len(scores), scores, out_w, out_h, lengths, length_unit, segments
 
@@ -445,12 +421,7 @@ async def segment(
     dot_size: Optional[float] = Form(default=12),
     dot_label: Optional[bool] = Form(default=True),
     confidence: float = Form(0.5),
-    roi_x0: Optional[float] = Form(default=None),
-    roi_y0: Optional[float] = Form(default=None),
-    roi_x1: Optional[float] = Form(default=None),
-    roi_y1: Optional[float] = Form(default=None),
     show_scores: bool = Form(default=True),
-    roi_only: bool = Form(default=False),
     scale_length: Optional[float] = Form(default=None),
     scale_px: Optional[float] = Form(default=None),
     scale_unit: Optional[str] = Form(default=None),
@@ -460,23 +431,29 @@ async def segment(
     """Perform segmentation based on the selected prompt."""
     loaded_image = _load_image(image, image_url)
 
-    box_payload = None
+    box_payload: Optional[Dict[str, float]] = None
     if all(v is not None for v in [box_x0, box_y0, box_x1, box_y1]):
+        assert box_x0 is not None
+        assert box_y0 is not None
+        assert box_x1 is not None
+        assert box_y1 is not None
         box_payload = {
-            "x0": box_x0,
-            "y0": box_y0,
-            "x1": box_x1,
-            "y1": box_y1,
-            "label": box_label,
+            "x0": float(box_x0),
+            "y0": float(box_y0),
+            "x1": float(box_x1),
+            "y1": float(box_y1),
+            "label": 1.0 if box_label else 0.0,
         }
 
-    dot_payload = None
+    dot_payload: Optional[Dict[str, float]] = None
     if dot_x is not None and dot_y is not None:
-        dot_payload = {"x": dot_x, "y": dot_y, "size": dot_size, "label": dot_label}
-
-    roi_payload = None
-    if all(v is not None for v in [roi_x0, roi_y0, roi_x1, roi_y1]):
-        roi_payload = {"x0": roi_x0, "y0": roi_y0, "x1": roi_x1, "y1": roi_y1}
+        assert dot_size is not None
+        dot_payload = {
+            "x": float(dot_x),
+            "y": float(dot_y),
+            "size": float(dot_size),
+            "label": 1.0 if dot_label else 0.0,
+        }
 
     async with MODEL_LOCK:
         (
@@ -496,17 +473,13 @@ async def segment(
             box_payload,
             dot_payload,
             confidence,
-            roi_payload,
             show_scores,
             scale_length,
             scale_px,
             scale_unit,
             fill_masks,
             box_thickness,
-            roi_only,
         )
-
-    # For ROI-only, overlay already cropped; for full-image we keep original sizing
 
     return JSONResponse(
         {
@@ -518,7 +491,6 @@ async def segment(
             "lengths": lengths,
             "length_unit": length_unit,
             "segments": segments_table,
-            "roi": roi_payload,
         }
     )
 
